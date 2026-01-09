@@ -618,12 +618,8 @@
   const URL_WARN_THRESHOLD = 2000  // Warning for potential browser compatibility issues
   const URL_MAX_THRESHOLD = 8000   // Maximum safe URL length
   
-  // Global linting state
-  let lintErrors = []
-  let pyodideForLinting = null
+  // Global state
   let cachedUrlLength = 0
-  let isLinting = false  // Guard flag to prevent re-entrant linting calls
-  let lastErrorState = JSON.stringify([])  // Cache of last error state to prevent redundant re-renders
 
   // Debounce utility
   function debounce(ms, fn) {
@@ -634,332 +630,13 @@
     }
   }
 
-  // Lint Python code and return errors (defined early)
-  async function lintPythonCode(code) {
-    const errors = []
-    
-    // Basic static checks
-    const lines = code.split('\n')
-    
-    // Check for common Python errors
-    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
-      const line = lines[lineNum]
-      const lineNumber = lineNum + 1
-      
-      // Check for common indentation issues (mixing tabs and spaces)
-      if (line.match(/^\t+ +/) || line.match(/^ +\t+/)) {
-        errors.push({
-          line: lineNumber,
-          message: 'Mixing tabs and spaces in indentation',
-          type: 'warning'
-        })
-      }
-      
-      // Check for missing colons (simplified - check if line ends with keyword but no colon)
-      const trimmedLine = line.trim()
-      // Only check lines that start with control flow keywords and don't end with colons or backslashes
-      // Avoid false positives for inline expressions like ternary operators
-      if (trimmedLine.match(/^(if|elif|for|while|def|class|try|except|finally|with)\s+\S/) &&
-          !trimmedLine.endsWith(':') && !trimmedLine.endsWith('\\') &&
-          !trimmedLine.includes(' else ')) {  // Avoid flagging ternary expressions
-        const keyword = trimmedLine.match(/^(if|elif|for|while|def|class|try|except|finally|with)\b/)[1]
-        errors.push({
-          line: lineNumber,
-          message: 'Missing colon after ' + keyword + ' statement',
-          type: 'error'
-        })
-      }
-    }
-    
-    // Note: Parentheses/bracket matching removed as it produces too many false positives
-    // for valid multi-line Python constructs. Consider using Python AST parsing for accurate detection.
-    
-    return errors
-  }
-
-  // Modified parsePython function with linting (defined early)
-  function parsePythonWithLinting(element) {
-    // Prevent re-entrant calls - critical to avoid infinite loop
-    if (isLinting) return
-    
-    isLinting = true
-    
-    const input = element.textContent
-    const frag = document.createDocumentFragment()
-    
-    // Get line-to-position mapping for error highlighting
-    const lines = input.split('\n')
-    const lineStarts = [0]
-    for (let i = 0; i < lines.length; i++) {
-      lineStarts.push(lineStarts[i] + lines[i].length + 1) // +1 for newline
-    }
-    
-    // Create a map of line numbers with errors
-    const errorLines = new Map()
-    for (const error of lintErrors) {
-      errorLines.set(error.line, error)
-    }
-
-    // Python keywords
-    const keywords = /\b(and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield)\b/y
-    
-    // Python built-in functions
-    const builtins = /\b(abs|all|any|ascii|bin|bool|bytearray|bytes|callable|chr|classmethod|compile|complex|delattr|dict|dir|divmod|enumerate|eval|exec|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|isinstance|issubclass|iter|len|list|locals|map|max|memoryview|min|next|object|oct|open|ord|pow|print|property|range|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|vars|zip|__import__)\b/y
-    
-    // Strings (single, double, triple quotes, raw, formatted)
-    const strings = [
-      /"""[\s\S]*?"""/y,  // Triple double quotes
-      /'''[\s\S]*?'''/y,  // Triple single quotes
-      /f"""[\s\S]*?"""/y, // f-string triple double
-      /f'''[\s\S]*?'''/y, // f-string triple single
-      /r"""[\s\S]*?"""/y, // raw string triple double
-      /r'''[\s\S]*?'''/y, // raw string triple single
-      /f"(?:[^"\\]|\\.)*"/y,  // f-string double
-      /f'(?:[^'\\]|\\.)*'/y,  // f-string single
-      /r"(?:[^"\\]|\\.)*"/y,  // raw string double
-      /r'(?:[^'\\]|\\.)*'/y,  // raw string single
-      /"(?:[^"\\]|\\.)*"/y,   // Double quote string
-      /'(?:[^'\\]|\\.)*'/y,   // Single quote string
-    ]
-    
-    // Comments
-    const comment = /#[^\n]*/y
-    
-    // Numbers
-    const number = /(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|(?:\d+\.\d*|\d*\.\d+|\d+)(?:[eE][+-]?\d+)?)\b/y
-    
-    // Decorators
-    const decorator = /@[\w.]+/y
-    
-    // Function/method definitions
-    const funcDef = /\bdef\s+(\w+)/y
-    
-    // Class definitions
-    const classDef = /\bclass\s+(\w+)/y
-
-    const specials = ['#', '"', '\'', '@', '.', 'd', 'c', 'f', 'r', 'a', 'b', 'e', 'i', 'l', 'n', 'o', 'p', 's', 't', 'w', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-
-    let i = 0
-    let currentLine = 1
-    
-    // Helper to wrap text with error highlighting
-    function createTextOrError(text, startPos) {
-      // Use binary search to find line number (more efficient than linear search)
-      let line = 1
-      for (let j = lineStarts.length - 1; j >= 0; j--) {
-        if (startPos >= lineStarts[j]) {
-          line = j + 1
-          break
-        }
-      }
-      
-      const error = errorLines.get(line)
-      if (error && line <= lineStarts.length) {
-        // Check if this text is on the error line
-        const lineEnd = (line < lineStarts.length) ? lineStarts[line] - 1 : input.length
-        if (startPos >= lineStarts[line - 1] && startPos < lineEnd) {
-          const span = document.createElement('span')
-          span.className = error.type === 'error' ? 'lint-error' : 'lint-warning'
-          span.textContent = text
-          
-          const tooltip = document.createElement('span')
-          tooltip.className = 'lint-tooltip'
-          tooltip.textContent = error.message
-          span.appendChild(tooltip)
-          
-          return span
-        }
-      }
-      
-      return document.createTextNode(text)
-    }
-    
-    while (i < input.length) {
-      let matched = false
-      const currentPos = i
-
-      // Track newlines for line numbers
-      if (input[i] === '\n') {
-        currentLine++
-      }
-
-      // Try to match comments first
-      comment.lastIndex = i
-      let res = comment.exec(input)
-      if (res && res.index === i) {
-        const span = document.createElement('span')
-        span.className = 'py-comment'
-        span.textContent = res[0]
-        frag.appendChild(span)
-        i += res[0].length
-        continue
-      }
-
-      // Try to match strings
-      for (const strRe of strings) {
-        strRe.lastIndex = i
-        res = strRe.exec(input)
-        if (res && res.index === i) {
-          const span = document.createElement('span')
-          span.className = 'py-string'
-          span.textContent = res[0]
-          frag.appendChild(span)
-          i += res[0].length
-          matched = true
-          break
-        }
-      }
-      if (matched) continue
-
-      // Try to match decorators
-      decorator.lastIndex = i
-      res = decorator.exec(input)
-      if (res && res.index === i) {
-        const span = document.createElement('span')
-        span.className = 'py-decorator'
-        span.textContent = res[0]
-        frag.appendChild(span)
-        i += res[0].length
-        continue
-      }
-
-      // Try to match function definitions
-      funcDef.lastIndex = i
-      res = funcDef.exec(input)
-      if (res && res.index === i) {
-        const kwSpan = document.createElement('span')
-        kwSpan.className = 'py-keyword'
-        kwSpan.textContent = 'def'
-        frag.appendChild(kwSpan)
-        
-        frag.appendChild(document.createTextNode(' '))
-        
-        const funcSpan = document.createElement('span')
-        funcSpan.className = 'py-function'
-        funcSpan.textContent = res[1]
-        frag.appendChild(funcSpan)
-        
-        i += res[0].length
-        continue
-      }
-
-      // Try to match class definitions
-      classDef.lastIndex = i
-      res = classDef.exec(input)
-      if (res && res.index === i) {
-        const kwSpan = document.createElement('span')
-        kwSpan.className = 'py-keyword'
-        kwSpan.textContent = 'class'
-        frag.appendChild(kwSpan)
-        
-        frag.appendChild(document.createTextNode(' '))
-        
-        const classSpan = document.createElement('span')
-        classSpan.className = 'py-class'
-        classSpan.textContent = res[1]
-        frag.appendChild(classSpan)
-        
-        i += res[0].length
-        continue
-      }
-
-      // Try to match keywords
-      keywords.lastIndex = i
-      res = keywords.exec(input)
-      if (res && res.index === i) {
-        const span = document.createElement('span')
-        span.className = 'py-keyword'
-        span.textContent = res[0]
-        frag.appendChild(span)
-        i += res[0].length
-        continue
-      }
-
-      // Try to match built-in functions
-      builtins.lastIndex = i
-      res = builtins.exec(input)
-      if (res && res.index === i) {
-        const span = document.createElement('span')
-        span.className = 'py-builtin'
-        span.textContent = res[0]
-        frag.appendChild(span)
-        i += res[0].length
-        continue
-      }
-
-      // Try to match numbers
-      number.lastIndex = i
-      res = number.exec(input)
-      if (res && res.index === i) {
-        const span = document.createElement('span')
-        span.className = 'py-number'
-        span.textContent = res[0]
-        frag.appendChild(span)
-        i += res[0].length
-        continue
-      }
-
-      // No special match, find next special character
-      let next = input.length
-      for (const ch of specials) {
-        const idx = input.indexOf(ch, i)
-        if (idx !== -1 && idx < next) next = idx
-      }
-
-      if (next === i) {
-        frag.appendChild(createTextOrError(input[i], i))
-        i++
-        continue
-      }
-
-      frag.appendChild(createTextOrError(input.slice(i, next), i))
-      i = next
-    }
-
-    article.textContent = ''
-    article.appendChild(frag)
-    article.normalize()
-    
-    // Reset flag after a short delay to ensure DOM updates have propagated
-    setTimeout(() => {
-      isLinting = false
-    }, 0)
-  }
-
   // Initialize after functions are defined
   initUI()
 
   const article = document.querySelector('article')
-  const editor = new Editor(article, parsePythonWithLinting)
-  
-  // Debounced linting function
-  const debouncedLint = debounce(500, async () => {
-    const code = article.textContent
-    if (!code.trim()) {
-      lintErrors = []
-      lastErrorState = JSON.stringify([])
-      return
-    }
-    
-    const newErrors = await lintPythonCode(code)
-    
-    // Create a serialized state of current errors to compare
-    const currentErrorState = JSON.stringify(newErrors)
-    
-    // Only re-render if errors have actually changed
-    if (currentErrorState !== lastErrorState) {
-      lintErrors = newErrors
-      lastErrorState = currentErrorState
-      
-      // Re-render with linting errors
-      const pos = editor.save()
-      parsePythonWithLinting(article)
-      if (pos) editor.restore(pos)
-    }
-  })
+  const editor = new Editor(article, parsePython)
   
   article.addEventListener('input', debounce(500, save))
-  article.addEventListener('input', debouncedLint)
   article.addEventListener('blur', save)
   article.addEventListener('click', event => {
     if (event.target.tagName === 'A') window.open(event.target.getAttribute('href'), '_blank')
@@ -1533,6 +1210,8 @@
     let pyodide = null
     let pyodideLoadFailed = false
     let pyodideLoadPromise = null
+    let lintTimeout = null
+    let isLinting = false
 
     async function loadPyodideScript() {
       return new Promise((resolve, reject) => {
@@ -1575,9 +1254,6 @@
           
           // Initialize Pyodide
           pyodide = await window.loadPyodide()
-          
-          // Set the global pyodideForLinting for use in linting
-          pyodideForLinting = pyodide
           
           // Clear the loading message only if it's still the only content
           if (outputContent.childNodes.length === 1 && outputContent.firstChild === outputInfoDiv) {
@@ -1653,10 +1329,97 @@
       }
     }
 
+    async function lintPythonCode() {
+      // Re-entrancy guard - prevent infinite loops
+      if (isLinting) {
+        return
+      }
+      
+      try {
+        isLinting = true
+        
+        // Get code from article element
+        const article = document.querySelector('article')
+        const code = article.textContent
+        
+        // If code is empty, hide output and return
+        if (!code.trim()) {
+          hideOutput()
+          return
+        }
+        
+        // Initialize Pyodide
+        const py = await initPyodide()
+        
+        // Pass code to Python safely using globals
+        py.globals.set('user_code', code)
+        
+        // Use Python AST to check syntax
+        const pythonCheckCode = `
+import ast
+import sys
+try:
+    ast.parse(user_code)
+except SyntaxError as e:
+    print(f"Syntax Error on line {e.lineno}: {e.msg}", file=sys.stderr)
+`
+        
+        // Capture stderr
+        const stderr = []
+        py.setStderr({
+          batched: (text) => stderr.push(text)
+        })
+        
+        // Run the syntax check
+        try {
+          await py.runPythonAsync(pythonCheckCode)
+          
+          const errors = stderr.join('').trim()
+          
+          if (errors) {
+            // Show syntax errors in output console
+            showOutput(errors, true)
+          } else {
+            // No errors - hide output if it was showing old syntax errors
+            // Check if output console is currently showing an error
+            const outputContent = document.querySelector('#output-content')
+            const outputConsole = document.querySelector('#output-console')
+            if (outputConsole.classList.contains('visible')) {
+              const errorContent = outputContent.querySelector('.output-error')
+              if (errorContent && errorContent.textContent.includes('Syntax Error')) {
+                hideOutput()
+              }
+            }
+          }
+        } catch (error) {
+          // Handle Python execution errors
+          console.error('Linting error:', error)
+        }
+      } catch (error) {
+        // Handle errors gracefully - don't show to user during linting
+        console.error('Error during linting:', error)
+      } finally {
+        isLinting = false
+      }
+    }
+    
+    function debouncedLint() {
+      clearTimeout(lintTimeout)
+      lintTimeout = setTimeout(() => {
+        lintPythonCode()
+      }, 1000)
+    }
+
     runPython.addEventListener('click', event => {
       event.preventDefault()
       runPythonCode()
     })
+    
+    // Add input event listener for automatic linting
+    const articleElement = document.querySelector('article')
+    if (articleElement) {
+      articleElement.addEventListener('input', debouncedLint)
+    }
   }
 
   function ripple(event) {
