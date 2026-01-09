@@ -622,6 +622,7 @@
   let lintErrors = []
   let pyodideForLinting = null
   let cachedUrlLength = 0
+  let isLinting = false  // Guard flag to prevent re-entrant linting calls
 
   // Debounce utility
   function debounce(ms, fn) {
@@ -677,6 +678,11 @@
 
   // Modified parsePython function with linting (defined early)
   function parsePythonWithLinting(element) {
+    // Prevent re-entrant calls - critical to avoid infinite loop
+    if (isLinting) return
+    
+    isLinting = true
+    
     const input = element.textContent
     const frag = document.createDocumentFragment()
     
@@ -912,6 +918,11 @@
     article.textContent = ''
     article.appendChild(frag)
     article.normalize()
+    
+    // Reset flag after a short delay to ensure DOM updates have propagated
+    setTimeout(() => {
+      isLinting = false
+    }, 0)
   }
 
   // Initialize after functions are defined
