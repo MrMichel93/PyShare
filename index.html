@@ -614,9 +614,14 @@
   <div id="output-content"></div>
 </div>
 <script>
+  // Global constants
+  const URL_WARN_THRESHOLD = 2000  // Warning for potential browser compatibility issues
+  const URL_MAX_THRESHOLD = 8000   // Maximum safe URL length
+  
   // Global linting state
   let lintErrors = []
   let pyodideForLinting = null
+  let cachedUrlLength = 0
 
   // Debounce utility
   function debounce(ms, fn) {
@@ -972,19 +977,15 @@
     // Check URL length and warn if necessary
     const fullUrl = location.origin + location.pathname + hash
     const urlLength = fullUrl.length
-    
-    // Browser URL length limits: IE ~2083, Chrome/Firefox ~2000 safe, but can handle more
-    // We'll warn at 2000 and prevent at 8000 (conservative limit)
-    const WARN_THRESHOLD = 2000
-    const MAX_THRESHOLD = 8000
+    cachedUrlLength = urlLength
     
     // Update URL size indicator
-    updateUrlSizeIndicator(urlLength, WARN_THRESHOLD, MAX_THRESHOLD)
+    updateUrlSizeIndicator(urlLength, URL_WARN_THRESHOLD, URL_MAX_THRESHOLD)
     
-    if (urlLength > MAX_THRESHOLD) {
-      showUrlLengthError(urlLength, MAX_THRESHOLD)
+    if (urlLength > URL_MAX_THRESHOLD) {
+      showUrlLengthError(urlLength, URL_MAX_THRESHOLD)
       return // Don't save if URL is too long
-    } else if (urlLength > WARN_THRESHOLD) {
+    } else if (urlLength > URL_WARN_THRESHOLD) {
       showUrlLengthWarning(urlLength)
     }
     
@@ -1419,12 +1420,16 @@
       
       // Update URL size indicator when menu opens
       if (menu.classList.contains('visible')) {
-        const hash = await get()
-        const fullUrl = location.origin + location.pathname + hash
-        const urlLength = fullUrl.length
-        const WARN_THRESHOLD = 2000
-        const MAX_THRESHOLD = 8000
-        updateUrlSizeIndicator(urlLength, WARN_THRESHOLD, MAX_THRESHOLD)
+        // Use cached URL length if available, otherwise calculate
+        if (cachedUrlLength > 0) {
+          updateUrlSizeIndicator(cachedUrlLength, URL_WARN_THRESHOLD, URL_MAX_THRESHOLD)
+        } else {
+          const hash = await get()
+          const fullUrl = location.origin + location.pathname + hash
+          const urlLength = fullUrl.length
+          cachedUrlLength = urlLength
+          updateUrlSizeIndicator(urlLength, URL_WARN_THRESHOLD, URL_MAX_THRESHOLD)
+        }
       }
     })
 
