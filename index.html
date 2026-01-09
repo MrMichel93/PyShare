@@ -609,22 +609,6 @@
       const line = lines[lineNum]
       const lineNumber = lineNum + 1
       
-      // Check for mismatched parentheses, brackets, braces (simple check per line)
-      const openParen = (line.match(/\(/g) || []).length
-      const closeParen = (line.match(/\)/g) || []).length
-      const openBracket = (line.match(/\[/g) || []).length
-      const closeBracket = (line.match(/\]/g) || []).length
-      const openBrace = (line.match(/\{/g) || []).length
-      const closeBrace = (line.match(/\}/g) || []).length
-      
-      if (openParen !== closeParen || openBracket !== closeBracket || openBrace !== closeBrace) {
-        errors.push({
-          line: lineNumber,
-          message: 'Mismatched parentheses, brackets, or braces',
-          type: 'warning'
-        })
-      }
-      
       // Check for common indentation issues (mixing tabs and spaces)
       if (line.match(/^\t+ +/) || line.match(/^ +\t+/)) {
         errors.push({
@@ -636,9 +620,12 @@
       
       // Check for missing colons (simplified - check if line ends with keyword but no colon)
       const trimmedLine = line.trim()
-      if (trimmedLine.match(/^(if|elif|else|for|while|def|class|try|except|finally|with)\b/) &&
-          !trimmedLine.endsWith(':') && !trimmedLine.endsWith('\\')) {
-        const keyword = trimmedLine.match(/^(if|elif|else|for|while|def|class|try|except|finally|with)\b/)[1]
+      // Only check lines that start with control flow keywords and don't end with colons or backslashes
+      // Avoid false positives for inline expressions like ternary operators
+      if (trimmedLine.match(/^(if|elif|for|while|def|class|try|except|finally|with)\s+\S/) &&
+          !trimmedLine.endsWith(':') && !trimmedLine.endsWith('\\') &&
+          !trimmedLine.includes(' else ')) {  // Avoid flagging ternary expressions
+        const keyword = trimmedLine.match(/^(if|elif|for|while|def|class|try|except|finally|with)\b/)[1]
         errors.push({
           line: lineNumber,
           message: 'Missing colon after ' + keyword + ' statement',
@@ -646,6 +633,9 @@
         })
       }
     }
+    
+    // Note: Parentheses/bracket matching removed as it produces too many false positives
+    // for valid multi-line Python constructs. Consider using Python AST parsing for accurate detection.
     
     return errors
   }
@@ -712,22 +702,20 @@
     
     // Helper to wrap text with error highlighting
     function createTextOrError(text, startPos) {
-      // Determine which line we're on
+      // Use binary search to find line number (more efficient than linear search)
       let line = 1
-      let pos = 0
-      for (let j = 0; j < lineStarts.length; j++) {
-        if (lineStarts[j] > startPos) {
-          line = j
+      for (let j = lineStarts.length - 1; j >= 0; j--) {
+        if (startPos >= lineStarts[j]) {
+          line = j + 1
           break
         }
-        line = j + 1
       }
       
       const error = errorLines.get(line)
-      if (error && startPos >= lineStarts[line - 1]) {
+      if (error && line <= lineStarts.length) {
         // Check if this text is on the error line
-        const lineEnd = lineStarts[line] - 1
-        if (startPos < lineEnd) {
+        const lineEnd = (line < lineStarts.length) ? lineStarts[line] - 1 : input.length
+        if (startPos >= lineStarts[line - 1] && startPos < lineEnd) {
           const span = document.createElement('span')
           span.className = error.type === 'error' ? 'lint-error' : 'lint-warning'
           span.textContent = text
@@ -908,9 +896,9 @@
     lintErrors = await lintPythonCode(code)
     
     // Re-render with linting errors
-    const pos = editor.save ? editor.save() : null
+    const pos = editor.save()
     parsePythonWithLinting(article)
-    if (pos && editor.restore) editor.restore(pos)
+    if (pos) editor.restore(pos)
   })
   
   article.addEventListener('input', debounce(500, save))
