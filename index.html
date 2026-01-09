@@ -1351,18 +1351,15 @@
         // Initialize Pyodide
         const py = await initPyodide()
         
-        // Escape the code for Python string - escape backslashes and triple quotes
-        const escapedCode = code
-          .replace(/\\/g, '\\\\')
-          .replace(/"""/g, '\\"\\"\\"')
+        // Pass code to Python safely using globals
+        py.globals.set('user_code', code)
         
         // Use Python AST to check syntax
         const pythonCheckCode = `
 import ast
 import sys
-code = """${escapedCode}"""
 try:
-    ast.parse(code)
+    ast.parse(user_code)
 except SyntaxError as e:
     print(f"Syntax Error on line {e.lineno}: {e.msg}", file=sys.stderr)
 `
