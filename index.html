@@ -589,6 +589,18 @@
     </svg>
     Save as TEXT
   </a>
+  <a class="item" id="save-as-python" href="" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-empty"></use>
+    </svg>
+    Save as Python
+  </a>
+  <button class="item" id="load-python-file" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-empty"></use>
+    </svg>
+    Load File
+  </button>
   <button class="item" id="run-python" role="menuitem">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-play"></use>
@@ -606,6 +618,7 @@
   </div>
 </div>
 <div id="notification" class="noprint"></div>
+<input type="file" id="file-input" accept=".py" style="display: none;">
 <div id="output-console" class="noprint">
   <div id="output-console-header">
     <h3>Output</h3>
@@ -826,6 +839,37 @@
     const a = document.createElement('a')
     a.href = url
     a.download = document.title + '.txt'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function downloadPython() {
+    updateTitle()
+    const text = article.textContent
+
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: document.title + '.py',
+          types: [{
+            description: 'Python file',
+            accept: {'text/x-python': ['.py']},
+          }],
+        })
+        const writable = await handle.createWritable()
+        await writable.write(text)
+        await writable.close()
+        return
+      } catch (e) {
+        if (e.name === 'AbortError') return
+      }
+    }
+
+    const blob = new Blob([text], {type: 'text/x-python'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = document.title + '.py'
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -1106,6 +1150,9 @@
     const shareLink = document.querySelector('#share-link')
     const saveAsHTML = document.querySelector('#save-as-html')
     const saveAsText = document.querySelector('#save-as-text')
+    const saveAsPython = document.querySelector('#save-as-python')
+    const loadPythonFile = document.querySelector('#load-python-file')
+    const fileInput = document.querySelector('#file-input')
     const runPython = document.querySelector('#run-python')
     const outputConsole = document.querySelector('#output-console')
     const outputContent = document.querySelector('#output-content')
@@ -1200,6 +1247,35 @@
       event.preventDefault()
       downloadTXT()
       hideMenu()
+    })
+    saveAsPython.addEventListener('click', event => {
+      event.preventDefault()
+      downloadPython()
+      hideMenu()
+    })
+    loadPythonFile.addEventListener('click', event => {
+      event.preventDefault()
+      fileInput.click()
+      hideMenu()
+    })
+    
+    fileInput.addEventListener('change', event => {
+      const file = event.target.files[0]
+      if (file) {
+        const reader = new FileReader()
+        reader.onload = function(e) {
+          const content = e.target.result
+          editor.set(content)
+          save()
+          notify('File loaded successfully')
+        }
+        reader.onerror = function() {
+          notifyError('Failed to read file')
+        }
+        reader.readAsText(file)
+        // Reset the input so the same file can be loaded again
+        event.target.value = ''
+      }
     })
     
     outputConsoleClose.addEventListener('click', () => {
