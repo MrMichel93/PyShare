@@ -623,6 +623,7 @@
   let pyodideForLinting = null
   let cachedUrlLength = 0
   let isLinting = false  // Guard flag to prevent re-entrant linting calls
+  let lastErrorState = JSON.stringify([])  // Cache of last error state to prevent redundant re-renders
 
   // Debounce utility
   function debounce(ms, fn) {
@@ -932,19 +933,29 @@
   const editor = new Editor(article, parsePythonWithLinting)
   
   // Debounced linting function
-  const debouncedLint = debounce(800, async () => {
+  const debouncedLint = debounce(500, async () => {
     const code = article.textContent
     if (!code.trim()) {
       lintErrors = []
+      lastErrorState = JSON.stringify([])
       return
     }
     
-    lintErrors = await lintPythonCode(code)
+    const newErrors = await lintPythonCode(code)
     
-    // Re-render with linting errors
-    const pos = editor.save()
-    parsePythonWithLinting(article)
-    if (pos) editor.restore(pos)
+    // Create a serialized state of current errors to compare
+    const currentErrorState = JSON.stringify(newErrors)
+    
+    // Only re-render if errors have actually changed
+    if (currentErrorState !== lastErrorState) {
+      lintErrors = newErrors
+      lastErrorState = currentErrorState
+      
+      // Re-render with linting errors
+      const pos = editor.save()
+      parsePythonWithLinting(article)
+      if (pos) editor.restore(pos)
+    }
   })
   
   article.addEventListener('input', debounce(500, save))
