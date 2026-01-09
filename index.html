@@ -299,6 +299,33 @@
     border-bottom-right-radius: 10px;
   }
 
+  #url-size-indicator {
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    padding-top: 8px !important;
+    margin-top: 4px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    #url-size-indicator {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      color: #8b949e !important;
+    }
+  }
+
+  #url-size-indicator:hover {
+    background-color: transparent !important;
+  }
+
+  #url-size.warning {
+    color: #ff9500;
+    font-weight: 600;
+  }
+
+  #url-size.error {
+    color: #ff3b30;
+    font-weight: 600;
+  }
+
   #notification {
     visibility: hidden;
     transform: translateY(-30px);
@@ -574,6 +601,9 @@
     </svg>
     GitHub
   </a>
+  <div id="url-size-indicator" class="item" style="cursor: default; font-size: 13px; color: #6a737d; justify-content: center;">
+    URL: <span id="url-size">0</span> chars
+  </div>
 </div>
 <div id="notification" class="noprint"></div>
 <div id="output-console" class="noprint">
@@ -584,9 +614,14 @@
   <div id="output-content"></div>
 </div>
 <script>
+  // Global constants
+  const URL_WARN_THRESHOLD = 2000  // Warning for potential browser compatibility issues
+  const URL_MAX_THRESHOLD = 8000   // Maximum safe URL length
+  
   // Global linting state
   let lintErrors = []
   let pyodideForLinting = null
+  let cachedUrlLength = 0
 
   // Debounce utility
   function debounce(ms, fn) {
@@ -938,6 +973,22 @@
 
   async function save() {
     const hash = await get()
+    
+    // Check URL length and warn if necessary
+    const fullUrl = location.origin + location.pathname + hash
+    const urlLength = fullUrl.length
+    cachedUrlLength = urlLength
+    
+    // Update URL size indicator
+    updateUrlSizeIndicator(urlLength, URL_WARN_THRESHOLD, URL_MAX_THRESHOLD)
+    
+    if (urlLength > URL_MAX_THRESHOLD) {
+      showUrlLengthError(urlLength, URL_MAX_THRESHOLD)
+      return // Don't save if URL is too long
+    } else if (urlLength > URL_WARN_THRESHOLD) {
+      showUrlLengthWarning(urlLength)
+    }
+    
     if (location.hash !== hash) history.replaceState({}, '', hash)
     try {
       localStorage.setItem('hash', hash)
@@ -982,6 +1033,36 @@
     writer.close()
     const buffer = await new Response(stream.readable).arrayBuffer()
     return new TextDecoder().decode(buffer)
+  }
+
+  function showUrlLengthWarning(urlLength) {
+    const notification = document.querySelector('#notification')
+    notification.classList.add('visible')
+    notification.textContent = `⚠️ Large content (${urlLength} chars). URL may not work in all browsers.`
+    notification.style.background = '#ff9500'
+    setTimeout(() => notification.classList.remove('visible'), 5000)
+  }
+
+  function showUrlLengthError(urlLength, maxLength) {
+    const notification = document.querySelector('#notification')
+    notification.classList.add('visible')
+    notification.textContent = `❌ Content too large (${urlLength}/${maxLength} chars). Please reduce text size.`
+    notification.style.background = '#ff3b30'
+    setTimeout(() => notification.classList.remove('visible'), 7000)
+  }
+
+  function updateUrlSizeIndicator(urlLength, warnThreshold, maxThreshold) {
+    const urlSizeElement = document.querySelector('#url-size')
+    if (!urlSizeElement) return
+    
+    urlSizeElement.textContent = urlLength
+    urlSizeElement.classList.remove('warning', 'error')
+    
+    if (urlLength > maxThreshold) {
+      urlSizeElement.classList.add('error')
+    } else if (urlLength > warnThreshold) {
+      urlSizeElement.classList.add('warning')
+    }
   }
 
   async function downloadHTML() {
@@ -1331,22 +1412,53 @@
     const outputContent = document.querySelector('#output-content')
     const outputConsoleClose = document.querySelector('#output-console-close')
 
-    button.addEventListener('click', event => {
+    button.addEventListener('click', async event => {
       if (event.clientX || event.targetTouches) ripple(event)
       menu.classList.toggle('visible')
       qr.setAttribute('href', '/qr' + location.hash)
       shareLink.setAttribute('href', location.href)
+      
+      // Update URL size indicator when menu opens
+      if (menu.classList.contains('visible')) {
+        // Use cached URL length if available, otherwise calculate
+        if (cachedUrlLength > 0) {
+          updateUrlSizeIndicator(cachedUrlLength, URL_WARN_THRESHOLD, URL_MAX_THRESHOLD)
+        } else {
+          const hash = await get()
+          const fullUrl = location.origin + location.pathname + hash
+          const urlLength = fullUrl.length
+          cachedUrlLength = urlLength
+          updateUrlSizeIndicator(urlLength, URL_WARN_THRESHOLD, URL_MAX_THRESHOLD)
+        }
+      }
     })
 
     function hideMenu() {
       menu.classList.remove('visible')
     }
 
-    function notify(message) {
+    function notify(message, duration = 2000) {
       const notification = document.querySelector('#notification')
       notification.classList.add('visible')
       notification.textContent = message
-      setTimeout(() => notification.classList.remove('visible'), 2e3)
+      notification.style.background = '#5ad227' // Green for success
+      setTimeout(() => notification.classList.remove('visible'), duration)
+    }
+    
+    function notifyWarning(message, duration = 4000) {
+      const notification = document.querySelector('#notification')
+      notification.classList.add('visible')
+      notification.textContent = message
+      notification.style.background = '#ff9500' // Orange for warning
+      setTimeout(() => notification.classList.remove('visible'), duration)
+    }
+    
+    function notifyError(message, duration = 5000) {
+      const notification = document.querySelector('#notification')
+      notification.classList.add('visible')
+      notification.textContent = message
+      notification.style.background = '#ff3b30' // Red for error
+      setTimeout(() => notification.classList.remove('visible'), duration)
     }
 
     function showOutput(content, isError = false) {
