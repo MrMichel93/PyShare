@@ -948,12 +948,7 @@
   })
   
   article.addEventListener('input', debounce(500, save))
-  article.addEventListener('input', (event) => {
-    // Don't run linting if we're already linting (prevents infinite loop)
-    if (!isLinting) {
-      debouncedLint()
-    }
-  })
+  article.addEventListener('input', debouncedLint)
   article.addEventListener('blur', save)
   article.addEventListener('click', event => {
     if (event.target.tagName === 'A') window.open(event.target.getAttribute('href'), '_blank')
