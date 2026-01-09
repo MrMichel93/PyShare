@@ -1338,7 +1338,8 @@
       try {
         isLinting = true
         
-        // Get code from article
+        // Get code from article element
+        const article = document.querySelector('article')
         const code = article.textContent
         
         // If code is empty, hide output and return
@@ -1418,7 +1419,10 @@ except SyntaxError as e:
     })
     
     // Add input event listener for automatic linting
-    article.addEventListener('input', debouncedLint)
+    const articleElement = document.querySelector('article')
+    if (articleElement) {
+      articleElement.addEventListener('input', debouncedLint)
+    }
   }
 
   function ripple(event) {
