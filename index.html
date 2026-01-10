@@ -31,6 +31,24 @@
     }
   }
 
+  /* Force light theme */
+  html.theme-light {
+    background-color: #fff;
+    --elevated: #fff;
+    --link: #0066cc;
+    --text: #161616;
+    --outline: #007aff;
+  }
+
+  /* Force dark theme */
+  html.theme-dark {
+    background-color: #000;
+    --elevated: #121212;
+    --link: #58a6ff;
+    --text: #fff;
+    --outline: #007aff;
+  }
+
   body {
     color: var(--text);
   }
@@ -180,6 +198,72 @@
     .py-builtin {
       color: #ff9e64;
     }
+  }
+
+  /* Force dark theme syntax colors */
+  html.theme-dark .py-keyword {
+    color: #ff7b72;
+  }
+
+  html.theme-dark .py-string {
+    color: #a5d6ff;
+  }
+
+  html.theme-dark .py-comment {
+    color: #8b949e;
+  }
+
+  html.theme-dark .py-number {
+    color: #79c0ff;
+  }
+
+  html.theme-dark .py-function {
+    color: #d2a8ff;
+  }
+
+  html.theme-dark .py-class {
+    color: #d2a8ff;
+  }
+
+  html.theme-dark .py-decorator {
+    color: #79c0ff;
+  }
+
+  html.theme-dark .py-builtin {
+    color: #ff9e64;
+  }
+
+  /* Force light theme syntax colors */
+  html.theme-light .py-keyword {
+    color: #d73a49;
+  }
+
+  html.theme-light .py-string {
+    color: #22863a;
+  }
+
+  html.theme-light .py-comment {
+    color: #6a737d;
+  }
+
+  html.theme-light .py-number {
+    color: #005cc5;
+  }
+
+  html.theme-light .py-function {
+    color: #6f42c1;
+  }
+
+  html.theme-light .py-class {
+    color: #6f42c1;
+  }
+
+  html.theme-light .py-decorator {
+    color: #005cc5;
+  }
+
+  html.theme-light .py-builtin {
+    color: #e36209;
   }
 
   #button {
@@ -606,6 +690,12 @@
       <use xlink:href="#icon-play"></use>
     </svg>
     Run Python
+  </button>
+  <button class="item" id="theme-toggle" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-theme"></use>
+    </svg>
+    <span id="theme-label">Dark Theme</span>
   </button>
   <a class="item" href="https://github.com/antonmedv/textarea" target="_blank" role="menuitem">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
@@ -1157,6 +1247,48 @@
     const outputConsole = document.querySelector('#output-console')
     const outputContent = document.querySelector('#output-content')
     const outputConsoleClose = document.querySelector('#output-console-close')
+    const themeToggle = document.querySelector('#theme-toggle')
+    const themeLabel = document.querySelector('#theme-label')
+
+    // Initialize theme from localStorage
+    const savedTheme = localStorage.getItem('theme')
+    if (savedTheme) {
+      document.documentElement.className = `theme-${savedTheme}`
+      updateThemeLabel(savedTheme)
+    }
+
+    function updateThemeLabel(theme) {
+      if (theme === 'dark') {
+        themeLabel.textContent = 'Light Theme'
+      } else if (theme === 'light') {
+        themeLabel.textContent = 'Dark Theme'
+      } else {
+        themeLabel.textContent = 'Dark Theme'
+      }
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement
+      const currentTheme = html.classList.contains('theme-dark') ? 'dark' :
+                          html.classList.contains('theme-light') ? 'light' : 'auto'
+      
+      let newTheme
+      if (currentTheme === 'auto' || currentTheme === 'light') {
+        newTheme = 'dark'
+      } else {
+        newTheme = 'light'
+      }
+      
+      html.className = `theme-${newTheme}`
+      localStorage.setItem('theme', newTheme)
+      updateThemeLabel(newTheme)
+    }
+
+    themeToggle.addEventListener('click', event => {
+      event.preventDefault()
+      toggleTheme()
+      hideMenu()
+    })
 
     button.addEventListener('click', async event => {
       if (event.clientX || event.targetTouches) ripple(event)
@@ -1512,6 +1644,135 @@ except SyntaxError as e:
     button.appendChild(circle)
   }
 
+  function handlePythonTyping(event) {
+    const selection = window.getSelection()
+    if (!selection.rangeCount) return
+    
+    const range = selection.getRangeAt(0)
+    
+    // Handle auto-closing pairs for brackets, quotes, and parentheses
+    const closingPairs = {
+      '(': ')',
+      '[': ']',
+      '{': '}',
+      '"': '"',
+      "'": "'"
+    }
+    
+    if (closingPairs[event.key] && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      // Check if we're typing a quote and the next character is already that quote
+      if ((event.key === '"' || event.key === "'") && !range.collapsed) {
+        // If text is selected, wrap it with the pair
+        event.preventDefault()
+        const selectedText = range.toString()
+        const paired = event.key + selectedText + closingPairs[event.key]
+        document.execCommand('insertText', false, paired)
+        return
+      }
+      
+      // Only auto-close if not typing a closing character for quotes
+      const nextChar = range.endContainer.textContent?.[range.endOffset]
+      if ((event.key === '"' || event.key === "'") && nextChar === event.key) {
+        // Skip the existing closing quote
+        event.preventDefault()
+        range.setStart(range.endContainer, range.endOffset + 1)
+        range.collapse(true)
+        selection.removeAllRanges()
+        selection.addRange(range)
+        return
+      }
+      
+      // Auto-close the pair
+      if (range.collapsed) {
+        event.preventDefault()
+        const closingChar = closingPairs[event.key]
+        document.execCommand('insertText', false, event.key + closingChar)
+        
+        // Move cursor back one position (before the closing character)
+        // Need to get fresh selection after the insert
+        const sel = window.getSelection()
+        if (sel.rangeCount > 0) {
+          const currentRange = sel.getRangeAt(0)
+          const newRange = document.createRange()
+          const offset = currentRange.endOffset - 1
+          if (offset >= 0 && currentRange.endContainer.nodeType === Node.TEXT_NODE) {
+            newRange.setStart(currentRange.endContainer, offset)
+            newRange.collapse(true)
+            sel.removeAllRanges()
+            sel.addRange(newRange)
+          }
+        }
+        return
+      }
+    }
+    
+    // Handle automatic indentation after colons
+    if (event.key === 'Enter') {
+      const beforeCursor = range.startContainer.textContent?.substring(0, range.startOffset) || ''
+      const currentLine = beforeCursor.split('\n').pop() || ''
+      
+      // Get indentation of current line
+      const indentMatch = currentLine.match(/^(\s*)/)
+      const currentIndent = indentMatch ? indentMatch[1] : ''
+      
+      // Check if line ends with a colon (potentially followed by whitespace or comments)
+      const colonMatch = currentLine.match(/:\s*(#.*)?$/)
+      
+      if (colonMatch) {
+        // Add extra indentation (4 spaces)
+        event.preventDefault()
+        const newIndent = currentIndent + '    '
+        document.execCommand('insertText', false, '\n' + newIndent)
+        return
+      } else if (currentIndent.length > 0) {
+        // Maintain current indentation
+        event.preventDefault()
+        document.execCommand('insertText', false, '\n' + currentIndent)
+        return
+      }
+    }
+    
+    // Handle Tab for keyword completion
+    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      const beforeCursor = range.startContainer.textContent?.substring(0, range.startOffset) || ''
+      const wordMatch = beforeCursor.match(/\b(\w+)$/)
+      
+      if (wordMatch) {
+        const partialWord = wordMatch[1]
+        const pythonKeywords = [
+          'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
+          'def', 'del', 'elif', 'else', 'except', 'False', 'finally', 'for',
+          'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'None',
+          'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'True', 'try',
+          'while', 'with', 'yield',
+          // Common built-ins
+          'print', 'len', 'range', 'str', 'int', 'float', 'list', 'dict',
+          'set', 'tuple', 'bool', 'type', 'open', 'input'
+        ]
+        
+        const matches = pythonKeywords.filter(kw => kw.startsWith(partialWord) && kw !== partialWord)
+        
+        if (matches.length === 1) {
+          // Complete the word
+          event.preventDefault()
+          const completion = matches[0].substring(partialWord.length)
+          document.execCommand('insertText', false, completion)
+          return
+        } else if (matches.length > 1) {
+          // Show first match as a hint (we'll just complete with the first match for simplicity)
+          event.preventDefault()
+          const completion = matches[0].substring(partialWord.length)
+          document.execCommand('insertText', false, completion)
+          return
+        }
+      }
+      
+      // If no completion, insert 4 spaces (Python standard)
+      event.preventDefault()
+      document.execCommand('insertText', false, '    ')
+    }
+  }
+
   function Editor(element, highlight) {
     const listeners = []
     const history = []
@@ -1552,6 +1813,9 @@ except SyntaxError as e:
         recordHistory()
         recording = true
       }
+      
+      // Python-specific typing features
+      handlePythonTyping(event)
     })
     on('keyup', event => {
       if (event.defaultPrevented) return
@@ -1838,6 +2102,11 @@ except SyntaxError as e:
           stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
     <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
     <path d="M7 4v16l13 -8z"/>
+  </symbol>
+  <symbol id="icon-theme" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/>
   </symbol>
   <symbol id="icon-empty" viewBox="0 0 24 24"></symbol>
 </svg>
